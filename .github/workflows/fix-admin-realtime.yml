@@ -1,0 +1,56 @@
+name: Apply Admin Realtime Patch
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor == 'stephenpalia188-lang'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch AdminPortal realtime subscription
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src/components/AdminPortal.tsx')
+          text = path.read_text(encoding='utf-8')
+
+          if "import { supabase } from '../lib/supabase';" not in text:
+              marker = "import { AdminProductModal } from './AdminProductModal';\n"
+              if marker not in text:
+                  raise SystemExit('AdminProductModal import marker not found')
+              text = text.replace(marker, marker + "import { supabase } from '../lib/supabase';\n", 1)
+
+          old = """  useEffect(() => {\n    if (isOpen && isAdmin && token) {\n      refreshAllAdminData();\n    }\n  }, [isOpen, isAdmin, token]);"""
+
+          new = """  useEffect(() => {\n    if (!isOpen || !isAdmin || !token) return;\n\n    refreshAllAdminData();\n\n    let channel: ReturnType<typeof supabase.channel> | null = null;\n    let disposed = false;\n\n    const startRealtime = async () => {\n      try {\n        await supabase.realtime.setAuth(token);\n\n        channel = supabase\n          .channel(`admin-orders-${user?.id || 'session'}`)\n          .on(\n            'postgres_changes',\n            { event: 'INSERT', schema: 'public', table: 'orders' },\n            async () => {\n              if (!disposed) await fetchAdminOrders();\n            }\n          )\n          .on(\n            'postgres_changes',\n            { event: 'UPDATE', schema: 'public', table: 'orders' },\n            async () => {\n              if (!disposed) await fetchAdminOrders();\n            }\n          )\n          .subscribe((status) => {\n            console.info('[Admin Realtime] orders channel:', status);\n            if (status === 'SUBSCRIBED' && !disposed) {\n              void fetchAdminOrders();\n            }\n          });\n      } catch (error) {\n        console.error('[Admin Realtime] subscription failed:', error);\n      }\n    };\n\n    void startRealtime();\n\n    return () => {\n      disposed = true;\n      if (channel) void supabase.removeChannel(channel);\n    };\n  }, [isOpen, isAdmin, token, user?.id]);"""
+
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "[Admin Realtime] orders channel:" in text:
+              raise SystemExit('Realtime patch already present')
+          else:
+              raise SystemExit('Expected AdminPortal useEffect block not found; refusing unsafe edit')
+
+          path.write_text(text, encoding='utf-8')
+
+      - name: Commit precise patch and remove temporary workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/fix-admin-realtime.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/AdminPortal.tsx .github/workflows/fix-admin-realtime.yml
+          git diff --cached --check
+          git diff --cached -- src/components/AdminPortal.tsx
+          git commit -m "fix: make admin order dashboard realtime"
+          git push origin HEAD:main
