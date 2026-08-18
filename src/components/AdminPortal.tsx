@@ -24,6 +24,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { Product, Order, Category, OrderStatus } from '../types';
 import { AdminProductModal } from './AdminProductModal';
+import { supabase } from '../lib/supabase';
 
 interface AdminPortalProps {
   isOpen: boolean;
@@ -119,10 +120,51 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   useEffect(() => {
-    if (isOpen && isAdmin && token) {
-      refreshAllAdminData();
-    }
-  }, [isOpen, isAdmin, token]);
+    if (!isOpen || !isAdmin || !token) return;
+
+    refreshAllAdminData();
+
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let disposed = false;
+
+    const startRealtime = async () => {
+      try {
+        await supabase.realtime.setAuth(token);
+
+        channel = supabase
+          .channel(`admin-orders-${user?.id || 'session'}`)
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'orders' },
+            async () => {
+              if (!disposed) await fetchAdminOrders();
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'orders' },
+            async () => {
+              if (!disposed) await fetchAdminOrders();
+            }
+          )
+          .subscribe((status) => {
+            console.info('[Admin Realtime] orders channel:', status);
+            if (status === 'SUBSCRIBED' && !disposed) {
+              void fetchAdminOrders();
+            }
+          });
+      } catch (error) {
+        console.error('[Admin Realtime] subscription failed:', error);
+      }
+    };
+
+    void startRealtime();
+
+    return () => {
+      disposed = true;
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [isOpen, isAdmin, token, user?.id]);
 
   if (!isOpen) return null;
 
