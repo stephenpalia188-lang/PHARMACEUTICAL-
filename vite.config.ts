@@ -4,6 +4,8 @@ import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
+  // Read Vercel build-time environment variables explicitly so the client bundle
+  // receives the existing Supabase configuration during production builds.
   const env = loadEnv(mode, process.cwd(), '');
   
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '';
