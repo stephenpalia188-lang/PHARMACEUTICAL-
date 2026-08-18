@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { CartItem, Product } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface CartContextType {
   cart: CartItem[];
@@ -14,7 +15,6 @@ interface CartContextType {
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
-
 const CART_STORAGE_KEY = 'gfp_cart_state_v1';
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -27,6 +27,54 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
   const [isCartOpen, setIsCartOpen] = useState(false);
+
+  // Reconcile persisted cart items with the live production catalog so stale
+  // products cannot survive catalog changes and fail later at checkout.
+  useEffect(() => {
+    let cancelled = false;
+
+    const reconcileCart = async () => {
+      if (!cart.length) return;
+
+      const ids = cart.map(item => item.product.id).filter(Boolean);
+      if (!ids.length) return;
+
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, name, price_kes, stock_quantity, is_active')
+        .in('id', ids);
+
+      if (cancelled || error || !data) return;
+
+      const liveById = new Map(data.map(product => [product.id, product]));
+      const reconciled = cart
+        .filter(item => {
+          const live = liveById.get(item.product.id);
+          return Boolean(live && live.is_active !== false && (live.stock_quantity ?? 0) > 0);
+        })
+        .map(item => {
+          const live = liveById.get(item.product.id)!;
+          const quantity = Math.min(item.quantity, live.stock_quantity ?? item.quantity);
+          return {
+            ...item,
+            product: { ...item.product, ...live },
+            quantity,
+          };
+        })
+        .filter(item => item.quantity > 0);
+
+      if (!cancelled) {
+        setCart(reconciled);
+      }
+    };
+
+    reconcileCart();
+    return () => {
+      cancelled = true;
+    };
+    // Reconcile on mount and whenever the cart contents change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     try {
@@ -82,19 +130,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const totalKes = cart.reduce((sum, item) => sum + item.product.price_kes * item.quantity, 0);
 
   return (
-    <CartContext.Provider
-      value={{
-        cart,
-        addToCart,
-        removeFromCart,
-        updateQuantity,
-        clearCart,
-        totalItems,
-        totalKes,
-        isCartOpen,
-        setIsCartOpen,
-      }}
-    >
+    <CartContext.Provider value={{ cart, addToCart, removeFromCart, updateQuantity, clearCart, totalItems, totalKes, isCartOpen, setIsCartOpen }}>
       {children}
     </CartContext.Provider>
   );
@@ -102,8 +138,6 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useCart = () => {
   const context = useContext(CartContext);
-  if (!context) {
-    throw new Error('useCart must be used within a CartProvider');
-  }
+  if (!context) throw new Error('useCart must be used within a CartProvider');
   return context;
 };
