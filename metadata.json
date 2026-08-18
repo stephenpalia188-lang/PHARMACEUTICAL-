@@ -1,0 +1,6 @@
+{
+  "name": "Gods Favor Pharmacy",
+  "description": "Production pharmacy management and online healthcare ordering system for Gods Favor Pharmacy in Kitale, Kenya. Features Supabase real-time database, catalog, cart, orders, and secure admin operations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
