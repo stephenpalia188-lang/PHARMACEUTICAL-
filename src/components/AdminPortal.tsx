@@ -160,8 +160,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     void startRealtime();
 
+    // Keep the dashboard live even if a browser/network blocks the Realtime WebSocket.
+    // The API remains the source of truth; this is only a lightweight live-update fallback.
+    const liveOrderPoll = window.setInterval(() => {
+      if (!disposed) void fetchAdminOrders();
+    }, 2500);
+
     return () => {
       disposed = true;
+      window.clearInterval(liveOrderPoll);
       if (channel) void supabase.removeChannel(channel);
     };
   }, [isOpen, isAdmin, token, user?.id]);
