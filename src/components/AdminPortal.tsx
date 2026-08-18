@@ -38,8 +38,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 }) => {
   const { user, session, isAdmin, signInWithEmail, signOut, loading: authLoading } = useAuth();
 
-  // Login form state
-  const [email, setEmail] = useState('botone678@gmail.com');
+  // Login form state - ALWAYS STARTS EMPTY
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -139,7 +139,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       }
     } catch (err: any) {
       console.error('Login error:', err);
-      setLoginError(err.message || 'Invalid administrator credentials. Please check password.');
+      setLoginError(err.message || 'Invalid administrator credentials. Please verify your email and password.');
     } finally {
       setIsLoggingIn(false);
     }
@@ -220,7 +220,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     if (!confirm('This will insert initial standard Kenyan pharmacy categories and products if not present. Continue?')) return;
     setIsSeeding(true);
     try {
-      const res = await fetch('/api/admin/seed', { method: 'POST' });
+      const res = await fetch('/api/admin/seed', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Seed failed');
       alert('Database seeded successfully with Gods Favor Pharmacy catalog!');
@@ -250,7 +253,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         {/* Top Bar */}
         <div className="p-4 sm:p-6 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-amber-500 text-slate-950 font-bold">
+            <div className="p-2 rounded-xl bg-amber-500 text-slate-900 font-bold">
               <Lock className="w-5 h-5" />
             </div>
             <div>
@@ -261,17 +264,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Designated Admin: <span className="text-amber-400 font-mono">botone678@gmail.com</span> • Location: Kitale, Kenya
+                {user ? (
+                  <span>Authenticated: <strong className="text-slate-200">{user.email}</strong></span>
+                ) : (
+                  <span>Restricted Access • Authorized Pharmacy Personnel Only</span>
+                )}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {isAdmin && (
+            {user && (
               <button
                 onClick={() => signOut()}
                 className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-900/60 text-slate-200 hover:text-rose-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                title="Sign out of Administrator Session"
+                title="Sign out"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Logout</span>
@@ -306,7 +313,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </div>
                 <h3 className="text-xl font-bold text-slate-900">Administrator Sign In</h3>
                 <p className="text-xs text-slate-500">
-                  Enter credentials for designated admin account <strong>botone678@gmail.com</strong>
+                  Enter your administrator credentials to access the management portal.
                 </p>
               </div>
 
@@ -314,66 +321,79 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-bold block">Access Denied:</span>
+                    <span className="font-bold block">Authentication Failed:</span>
                     <span>{loginError}</span>
                   </div>
                 </div>
               )}
 
               {user && !isAdmin && (
-                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
-                  <strong>Logged in as:</strong> {user.email}<br />
-                  This user account is a <em>Customer</em> role. Only <strong>botone678@gmail.com</strong> or profiles with <em>admin</em> role can access the management dashboard.
+                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
+                  <div className="flex items-center gap-2 font-bold">
+                    <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0" />
+                    <span>Insufficient Permissions</span>
+                  </div>
+                  <p>
+                    Your account ({user.email}) does not have administrator privileges. Please sign in with an authorized administrator account.
+                  </p>
+                  <button
+                    onClick={() => signOut()}
+                    className="px-3 py-1.5 rounded-lg bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold text-xs cursor-pointer transition-colors"
+                  >
+                    Sign Out & Switch Account
+                  </button>
                 </div>
               )}
 
-              <form onSubmit={handleLoginSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                    Admin Email Address
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="botone678@gmail.com"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm font-medium"
-                  />
-                </div>
+              {(!user || isAdmin) && (
+                <form onSubmit={handleLoginSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      placeholder="admin@example.com"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm font-medium"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="Enter password..."
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Enter password..."
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm"
+                    />
+                  </div>
 
-                <button
-                  type="submit"
-                  disabled={isLoggingIn}
-                  id="admin-login-submit-btn"
-                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                >
-                  <Lock className="w-4 h-4 text-amber-400" />
-                  <span>{isLoggingIn ? 'Authenticating with Supabase...' : 'Sign In as Administrator'}</span>
-                </button>
-              </form>
+                  <button
+                    type="submit"
+                    disabled={isLoggingIn}
+                    id="admin-login-submit-btn"
+                    className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <Lock className="w-4 h-4 text-amber-400" />
+                    <span>{isLoggingIn ? 'Authenticating with Supabase...' : 'Sign In as Administrator'}</span>
+                  </button>
+                </form>
+              )}
 
               <div className="pt-2 text-center border-t border-slate-100">
                 <button
                   onClick={onOpenDiagnostics}
-                  className="text-xs text-emerald-700 hover:underline flex items-center gap-1 mx-auto"
+                  className="text-xs text-emerald-700 hover:underline flex items-center gap-1 mx-auto cursor-pointer"
                 >
                   <Database className="w-3.5 h-3.5" />
-                  <span>Check Supabase Database Connection & Setup Status</span>
+                  <span>Check Supabase Database Connection Status</span>
                 </button>
               </div>
             </div>
@@ -695,14 +715,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                     setSelectedProductForEdit(product);
                                     setIsProductModalOpen(true);
                                   }}
-                                  className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors"
+                                  className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
                                   title="Edit Product"
                                 >
                                   <Edit3 className="w-4 h-4" />
                                 </button>
                                 <button
                                   onClick={() => handleDeleteProduct(product.id, product.name)}
-                                  className="p-1.5 rounded-lg hover:bg-rose-100 text-rose-600 transition-colors"
+                                  className="p-1.5 rounded-lg hover:bg-rose-100 text-rose-600 transition-colors cursor-pointer"
                                   title="Delete Product"
                                 >
                                   <Trash2 className="w-4 h-4" />

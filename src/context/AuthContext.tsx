@@ -27,13 +27,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchProfile = async (currentUser: User) => {
     try {
-      const isDesignatedAdmin = currentUser.email?.toLowerCase() === 'botone678@gmail.com';
       const client = getSupabaseClient();
       
       if (!client) {
-        if (isDesignatedAdmin) {
-          setRole('admin');
-        }
+        setRole('customer');
         return;
       }
 
@@ -45,46 +42,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (!error && data) {
         setProfile(data);
-        setRole(data.role || (isDesignatedAdmin ? 'admin' : 'customer'));
+        setRole(data.role || 'customer');
       } else {
-        const computedRole: UserRole = isDesignatedAdmin ? 'admin' : 'customer';
-        setRole(computedRole);
+        const defaultRole: UserRole = 'customer';
+        setRole(defaultRole);
         setProfile({
           id: currentUser.id,
           email: currentUser.email || '',
-          full_name: currentUser.user_metadata?.full_name || (isDesignatedAdmin ? 'Administrator' : 'Customer'),
+          full_name: currentUser.user_metadata?.full_name || 'User',
           phone: currentUser.user_metadata?.phone || '',
-          role: computedRole,
+          role: defaultRole,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         });
       }
     } catch (err) {
-      console.error('Error fetching profile:', err);
-      if (currentUser.email?.toLowerCase() === 'botone678@gmail.com') {
-        setRole('admin');
-      }
+      console.error('Error fetching user profile:', err);
+      setRole('customer');
     }
   };
 
   useEffect(() => {
     const client = getSupabaseClient();
     if (!client) {
-      // Check stored session in localStorage if any
-      const savedAuth = localStorage.getItem('gfp_auth_session');
-      if (savedAuth) {
-        try {
-          const parsed = JSON.parse(savedAuth);
-          if (parsed.user && parsed.session) {
-            setUser(parsed.user);
-            setSession(parsed.session);
-            setRole(parsed.role || 'customer');
-            setProfile(parsed.profile || null);
-          }
-        } catch (e) {
-          localStorage.removeItem('gfp_auth_session');
-        }
-      }
       setLoading(false);
       return;
     }
@@ -121,91 +101,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signInWithEmail = async (email: string, password: string): Promise<{ error: Error | null }> => {
     try {
-      const cleanEmail = email.trim().toLowerCase();
       const client = getSupabaseClient();
-
-      if (client) {
-        try {
-          const { data, error } = await client.auth.signInWithPassword({
-            email: cleanEmail,
-            password,
-          });
-          if (!error && data.session && data.user) {
-            setSession(data.session);
-            setUser(data.user);
-            await fetchProfile(data.user);
-            return { error: null };
-          }
-        } catch (e) {
-          console.warn('Client Supabase Auth failed, trying server proxy:', e);
-        }
+      if (!client) {
+        return {
+          error: new Error('Supabase is not configured. Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in your environment.')
+        };
       }
 
-      // Call backend auth proxy
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password }),
+      const { data, error } = await client.auth.signInWithPassword({
+        email: email.trim(),
+        password,
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Invalid administrator or user credentials.');
+      if (error) {
+        return { error: new Error(error.message) };
       }
 
-      if (data.user && data.session) {
-        setUser(data.user as User);
-        setSession(data.session as Session);
-        const userRole: UserRole = data.role || (cleanEmail === 'botone678@gmail.com' ? 'admin' : 'customer');
-        setRole(userRole);
-        
-        const userProfile: Profile = {
-          id: data.user.id,
-          email: data.user.email,
-          full_name: data.user.user_metadata?.full_name || (cleanEmail === 'botone678@gmail.com' ? 'Gods Favor Administrator' : 'Customer'),
-          role: userRole,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        setProfile(userProfile);
-
-        // Store session for persistence
-        try {
-          localStorage.setItem('gfp_auth_session', JSON.stringify({
-            user: data.user,
-            session: data.session,
-            role: userRole,
-            profile: userProfile,
-          }));
-        } catch (e) {
-          // ignore
-        }
-
-        return { error: null };
+      if (!data.session || !data.user) {
+        return { error: new Error('Invalid authentication response from Supabase.') };
       }
 
-      return { error: new Error('Authentication response invalid.') };
+      setSession(data.session);
+      setUser(data.user);
+      await fetchProfile(data.user);
+      return { error: null };
     } catch (err: any) {
-      return { error: err };
+      return { error: err instanceof Error ? err : new Error(err.message || 'Authentication error') };
     }
   };
 
   const signUpWithEmail = async (email: string, password: string, fullName: string, phone: string) => {
-    const client = getSupabaseClient();
-    if (!client) {
-      return { error: new Error('Supabase client is not configured.') };
-    }
-    const { error } = await client.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        data: {
-          full_name: fullName.trim(),
-          phone: phone.trim(),
-        }
+    try {
+      const client = getSupabaseClient();
+      if (!client) {
+        return { error: new Error('Supabase is not configured.') };
       }
-    });
-    return { error };
+      const { error } = await client.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            full_name: fullName.trim(),
+            phone: phone.trim(),
+          }
+        }
+      });
+      return { error: error ? new Error(error.message) : null };
+    } catch (err: any) {
+      return { error: err instanceof Error ? err : new Error(err.message || 'Registration error') };
+    }
   };
 
   const signOut = async () => {
@@ -215,9 +159,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await client.auth.signOut();
       }
     } catch (e) {
-      // ignore
+      console.error('Sign out error:', e);
     }
-    localStorage.removeItem('gfp_auth_session');
     setUser(null);
     setSession(null);
     setProfile(null);
@@ -230,7 +173,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const isAdmin = role === 'admin' || user?.email?.toLowerCase() === 'botone678@gmail.com';
+  const isAdmin = role === 'admin';
 
   return (
     <AuthContext.Provider

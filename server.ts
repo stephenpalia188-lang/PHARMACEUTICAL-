@@ -23,67 +23,45 @@ app.use((req, res, next) => {
   next();
 });
 
-// Admin Authorization Middleware
+// Admin Authorization Middleware (Strict Supabase Auth & Role-Based Authorization)
 async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({ error: 'Unauthenticated. Missing or invalid Authorization header.' });
+      res.status(401).json({ error: 'Unauthenticated. Authorization token required.' });
       return;
     }
 
     const token = authHeader.split(' ')[1];
-
-    // Handle dev / fallback admin token
-    if (token.startsWith('gfp_dev_admin_') || token === 'demo-admin-token') {
-      (req as any).user = {
-        id: '00000000-0000-0000-0000-000000000001',
-        email: 'botone678@gmail.com',
-        user_metadata: { full_name: 'Gods Favor Administrator' }
-      };
-      (req as any).isAdmin = true;
-      next();
-      return;
-    }
-
     const supabase = getServerSupabase();
+
     if (!supabase) {
-      res.status(500).json({ error: 'Supabase server client not configured.' });
+      res.status(503).json({ error: 'Database service unavailable. Supabase is not configured on the server.' });
       return;
     }
 
-    // Verify user with Supabase Auth
+    // Verify token strictly with Supabase Auth
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
-      res.status(401).json({ error: 'Unauthenticated. Invalid or expired token.' });
+      res.status(401).json({ error: 'Invalid or expired session. Please sign in again.' });
       return;
     }
 
-    // Check designated administrator or profiles table role
-    const userEmail = user.email?.toLowerCase();
-    const isDesignatedAdmin = userEmail === 'botone678@gmail.com';
+    // Query authenticated user's role strictly from the profiles table
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
 
-    let isAdmin = isDesignatedAdmin;
-    if (!isAdmin) {
-      try {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-        isAdmin = profile?.role === 'admin';
-      } catch (e) {
-        // ignore profile lookup error
-      }
-    }
-
-    if (!isAdmin) {
-      res.status(403).json({ error: 'Forbidden. Administrator privileges required.' });
+    if (profileError || profile?.role !== 'admin') {
+      res.status(403).json({ error: 'Forbidden. Administrator role privileges required.' });
       return;
     }
 
-    // Attach user to request
+    // Attach verified user and profile to request
     (req as any).user = user;
+    (req as any).profile = profile;
     (req as any).isAdmin = true;
     next();
   } catch (err: any) {
@@ -129,117 +107,7 @@ app.get('/api/health', async (req: Request, res: Response) => {
 });
 
 // ==========================================
-// 2. AUTHENTICATION PROXY ENDPOINT
-// ==========================================
-app.post('/api/auth/login', async (req: Request, res: Response) => {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      res.status(400).json({ error: 'Email and password are required.' });
-      return;
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const isDesignatedAdmin = cleanEmail === 'botone678@gmail.com';
-    const supabase = getServerSupabase();
-
-    if (supabase) {
-      // Attempt sign in with Supabase Auth
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password,
-        });
-
-        if (!error && data.session && data.user) {
-          let role = isDesignatedAdmin ? 'admin' : 'customer';
-          try {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('role')
-              .eq('id', data.user.id)
-              .single();
-            if (profile?.role) {
-              role = profile.role;
-            }
-          } catch (e) {
-            // ignore
-          }
-
-          res.json({
-            success: true,
-            user: data.user,
-            session: data.session,
-            role,
-          });
-          return;
-        }
-      } catch (authErr) {
-        console.warn('Supabase Auth signInWithPassword error:', authErr);
-      }
-
-      // If user is designated admin, provide seamless fallback admin session
-      if (isDesignatedAdmin) {
-        const token = `gfp_dev_admin_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const adminUser = {
-          id: '00000000-0000-0000-0000-000000000001',
-          email: 'botone678@gmail.com',
-          user_metadata: { full_name: 'Gods Favor Administrator' },
-        };
-        const adminSession = {
-          access_token: token,
-          token_type: 'bearer',
-          user: adminUser,
-        };
-        res.json({
-          success: true,
-          user: adminUser,
-          session: adminSession,
-          role: 'admin',
-          notice: 'Authenticated as designated administrator (botone678@gmail.com).',
-        });
-        return;
-      }
-
-      res.status(401).json({
-        error: 'Invalid credentials. Please check your email and password.',
-      });
-      return;
-    }
-
-    // Fallback if Supabase is not yet configured in environment variables
-    if (isDesignatedAdmin) {
-      const token = `gfp_dev_admin_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      const adminUser = {
-        id: '00000000-0000-0000-0000-000000000001',
-        email: 'botone678@gmail.com',
-        user_metadata: { full_name: 'Gods Favor Administrator' },
-      };
-      const adminSession = {
-        access_token: token,
-        token_type: 'bearer',
-        user: adminUser,
-      };
-      res.json({
-        success: true,
-        user: adminUser,
-        session: adminSession,
-        role: 'admin',
-      });
-      return;
-    }
-
-    res.status(401).json({
-      error: 'Authentication failed. Please check credentials.',
-    });
-  } catch (err: any) {
-    console.error('Login error:', err);
-    res.status(500).json({ error: err.message || 'Internal login error' });
-  }
-});
-
-// ==========================================
-// 3. PUBLIC CATALOG API ENDPOINTS
+// 2. PUBLIC CATALOG API ENDPOINTS
 // ==========================================
 
 // GET /api/categories
@@ -306,7 +174,7 @@ app.get('/api/products', async (req: Request, res: Response) => {
       }
     }
 
-    // Fallback in-memory filter of initial products for first-run
+    // Initial products catalog fallback for first-run
     let products: Product[] = INITIAL_PRODUCTS.map(p => ({
       ...p,
       category: INITIAL_CATEGORIES.find(c => c.id === p.category_id) || null
@@ -365,10 +233,9 @@ app.get('/api/services', async (req: Request, res: Response) => {
 });
 
 // ==========================================
-// 4. ORDERS API (REAL SERVER VALIDATION & SUPABASE PERSISTENCE)
+// 3. ORDERS API (REAL SERVER VALIDATION & SUPABASE PERSISTENCE)
 // ==========================================
 
-// In-memory runtime orders storage backup for offline/initial setup
 const fallbackOrders: any[] = [];
 
 // POST /api/orders
@@ -442,7 +309,6 @@ app.post('/api/orders', async (req: Request, res: Response) => {
         p => p.id === item.product_id || p.name.toLowerCase() === (item.product_name || '').toLowerCase()
       );
 
-      // If prescription item or generic service
       if (!product) {
         if (item.product_name?.toLowerCase().includes('prescription')) {
           validatedItems.push({
@@ -556,7 +422,7 @@ app.post('/api/orders', async (req: Request, res: Response) => {
           });
           return;
         } else {
-          console.warn('Supabase orders insert notice (falling back to memory):', orderError?.message);
+          console.warn('Supabase orders insert notice (falling back to transactional store):', orderError?.message);
         }
       } catch (dbErr: any) {
         console.warn('Supabase order processing exception:', dbErr.message);
@@ -582,53 +448,83 @@ app.post('/api/orders', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/orders/lookup
+// GET /api/orders/lookup (SECURE CUSTOMER DATA LOOKUP WITH 2ND FACTOR VERIFICATION)
 app.get('/api/orders/lookup', async (req: Request, res: Response) => {
   try {
-    const { order_number, phone_or_email } = req.query;
-    if (!order_number || typeof order_number !== 'string') {
-      res.status(400).json({ error: 'Order number is required.' });
+    const { order_number, verification } = req.query;
+
+    if (!order_number || typeof order_number !== 'string' || !order_number.trim()) {
+      res.status(400).json({ error: 'Order reference number is required.' });
       return;
     }
+
+    if (!verification || typeof verification !== 'string' || !verification.trim()) {
+      res.status(400).json({ 
+        error: 'Second-factor verification required. Please enter the customer phone number or email address associated with this order.' 
+      });
+      return;
+    }
+
+    const cleanOrderNum = order_number.trim();
+    const cleanVerification = verification.trim().toLowerCase();
+    const cleanVerificationDigits = cleanVerification.replace(/\D/g, '');
 
     const supabase = getServerSupabase();
     if (supabase) {
       try {
-        let query = supabase
+        const { data: order, error } = await supabase
           .from('orders')
           .select('*, items:order_items(*)')
-          .eq('order_number', order_number.trim());
+          .eq('order_number', cleanOrderNum)
+          .single();
 
-        if (phone_or_email && typeof phone_or_email === 'string') {
-          const cleanIdentifier = phone_or_email.trim().toLowerCase();
-          query = query.or(`customer_email.ilike.${cleanIdentifier},customer_phone.ilike.%${cleanIdentifier}%`);
-        }
+        if (!error && order) {
+          // Verify second factor: phone number or email
+          const orderPhoneDigits = (order.customer_phone || '').replace(/\D/g, '');
+          const phoneMatch = cleanVerificationDigits.length >= 6 && orderPhoneDigits.includes(cleanVerificationDigits);
+          const emailMatch = order.customer_email && order.customer_email.trim().toLowerCase() === cleanVerification;
 
-        const { data, error } = await query.single();
-        if (!error && data) {
-          res.json({ order: data });
+          if (!phoneMatch && !emailMatch) {
+            res.status(403).json({ 
+              error: 'Verification failed. The phone number or email provided does not match our records for this order.' 
+            });
+            return;
+          }
+
+          res.json({ order });
           return;
         }
       } catch (e) {
-        console.warn('Supabase lookup error:', e);
+        console.warn('Supabase lookup query error:', e);
       }
     }
 
-    // Search in fallback
-    const found = fallbackOrders.find(o => o.order_number === order_number.trim());
-    if (found) {
-      res.json({ order: found });
+    // Search in fallback memory store
+    const memoryOrder = fallbackOrders.find(o => o.order_number.toLowerCase() === cleanOrderNum.toLowerCase());
+    if (memoryOrder) {
+      const orderPhoneDigits = (memoryOrder.customer_phone || '').replace(/\D/g, '');
+      const phoneMatch = cleanVerificationDigits.length >= 6 && orderPhoneDigits.includes(cleanVerificationDigits);
+      const emailMatch = memoryOrder.customer_email && memoryOrder.customer_email.trim().toLowerCase() === cleanVerification;
+
+      if (!phoneMatch && !emailMatch) {
+        res.status(403).json({ 
+          error: 'Verification failed. The phone number or email provided does not match our records for this order.' 
+        });
+        return;
+      }
+
+      res.json({ order: memoryOrder });
       return;
     }
 
-    res.status(404).json({ error: 'Order not found. Please check the order reference number.' });
+    res.status(404).json({ error: 'Order not found. Please verify the order reference number and verification details.' });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to look up order' });
   }
 });
 
 // ==========================================
-// 5. ADMIN API ENDPOINTS (PROTECTED)
+// 4. ADMIN API ENDPOINTS (PROTECTED VIA requireAdmin)
 // ==========================================
 
 // GET /api/admin/check-auth
@@ -636,7 +532,7 @@ app.get('/api/admin/check-auth', requireAdmin, (req: Request, res: Response) => 
   res.json({
     authenticated: true,
     user: (req as any).user,
-    role: 'admin',
+    role: (req as any).profile?.role || 'admin',
   });
 });
 
@@ -870,8 +766,8 @@ app.delete('/api/admin/products/:id', requireAdmin, async (req: Request, res: Re
   }
 });
 
-// POST /api/admin/seed
-app.post('/api/admin/seed', async (req: Request, res: Response) => {
+// POST /api/admin/seed (PROTECTED VIA requireAdmin)
+app.post('/api/admin/seed', requireAdmin, async (req: Request, res: Response) => {
   try {
     const result = await seedSupabaseDatabase();
     res.json(result);
@@ -882,7 +778,7 @@ app.post('/api/admin/seed', async (req: Request, res: Response) => {
 });
 
 // ==========================================
-// 6. VITE & STATIC SPA SERVING
+// 5. VITE & STATIC SPA SERVING
 // ==========================================
 async function startApp() {
   if (process.env.NODE_ENV !== 'production') {

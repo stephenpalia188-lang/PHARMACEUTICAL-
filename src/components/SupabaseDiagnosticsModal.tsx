@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS public.order_items (
     subtotal_kes INTEGER NOT NULL CHECK (subtotal_kes >= 0)
 );
 
--- 7. Admin Auto-Role Trigger for botone678@gmail.com
+-- 7. Profiles Trigger for New Users
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -142,10 +142,9 @@ BEGIN
         NEW.id,
         NEW.email,
         COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
-        CASE WHEN lower(NEW.email) = 'botone678@gmail.com' THEN 'admin' ELSE 'customer' END
+        COALESCE(NEW.raw_user_meta_data->>'role', 'customer')
     )
-    ON CONFLICT (id) DO UPDATE
-    SET role = CASE WHEN lower(EXCLUDED.email) = 'botone678@gmail.com' THEN 'admin' ELSE profiles.role END;
+    ON CONFLICT (id) DO NOTHING;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -272,9 +271,9 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi...`;
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                <span className="text-slate-500 block mb-0.5">Designated Admin:</span>
-                <strong className="text-emerald-900 font-mono">botone678@gmail.com</strong>
-                <span className="text-[11px] text-slate-400 block mt-0.5">Auto-elevated Role</span>
+                <span className="text-slate-500 block mb-0.5">Authorization:</span>
+                <strong className="text-emerald-900 font-mono">Role-Based (RLS)</strong>
+                <span className="text-[11px] text-slate-400 block mt-0.5">profiles.role = 'admin'</span>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">

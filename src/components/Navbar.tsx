@@ -185,7 +185,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200'
                   : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
               }`}
-              title={isAdmin ? "Logged in as Admin (botone678@gmail.com)" : "Admin Login Portal"}
+              title={isAdmin ? "Administrator Session" : "Admin Login Portal"}
             >
               <Lock className="w-3.5 h-3.5" />
               <span>{isAdmin ? 'Admin Dashboard' : 'Admin Portal'}</span>
