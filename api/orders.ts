@@ -1,4 +1,4 @@
-import { getServerSupabase } from '../src/lib/server-supabase';
+import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
@@ -7,6 +7,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const {
       customer_name,
       customer_phone,
@@ -15,7 +16,7 @@ export default async function handler(req: any, res: any) {
       notes,
       items,
       customer_id,
-    } = req.body || {};
+    } = body;
 
     if (!customer_name || typeof customer_name !== 'string' || customer_name.trim().length < 2) {
       return res.status(400).json({ error: 'Valid customer name is required.' });
@@ -23,24 +24,31 @@ export default async function handler(req: any, res: any) {
     if (!customer_phone || typeof customer_phone !== 'string' || customer_phone.trim().length < 6) {
       return res.status(400).json({ error: 'Valid Kenyan phone number is required.' });
     }
-    if (!customer_email || !customer_email.includes('@')) {
+    if (!customer_email || typeof customer_email !== 'string' || !customer_email.includes('@')) {
       return res.status(400).json({ error: 'Valid email address is required.' });
     }
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Order must contain at least one product.' });
     }
 
-    const supabase = getServerSupabase();
-    if (!supabase) {
-      return res.status(503).json({ error: 'Order service is not configured.' });
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('Order API: required server Supabase environment variables are missing.');
+      return res.status(503).json({ error: 'Order service is not configured on the server.' });
     }
+
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('*');
+      .select('id,name,price_kes,stock_quantity,is_available');
 
     if (productsError) {
-      console.error('Order product lookup failed:', productsError);
+      console.error('Order product lookup failed:', productsError.message);
       return res.status(503).json({ error: 'Unable to verify medicine stock right now.' });
     }
 
@@ -48,28 +56,18 @@ export default async function handler(req: any, res: any) {
     const validatedItems: any[] = [];
 
     for (const item of items) {
-      const quantity = Math.floor(Number(item.quantity));
+      const quantity = Math.floor(Number(item?.quantity));
       if (!Number.isFinite(quantity) || quantity <= 0) {
-        return res.status(400).json({ error: `Invalid quantity for ${item.product_name || 'item'}.` });
+        return res.status(400).json({ error: `Invalid quantity for ${item?.product_name || 'item'}.` });
       }
 
       const product = (products || []).find(
-        (p: any) => p.id === item.product_id ||
-          String(p.name).toLowerCase() === String(item.product_name || '').toLowerCase()
+        (p: any) => p.id === item?.product_id ||
+          String(p.name).toLowerCase() === String(item?.product_name || '').toLowerCase()
       );
 
       if (!product) {
-        if (String(item.product_name || '').toLowerCase().includes('prescription')) {
-          validatedItems.push({
-            product_id: null,
-            product_name: item.product_name,
-            quantity: 1,
-            unit_price_kes: 0,
-            subtotal_kes: 0,
-          });
-          continue;
-        }
-        return res.status(400).json({ error: `Product "${item.product_name || item.product_id}" not found in catalog.` });
+        return res.status(400).json({ error: `Product "${item?.product_name || item?.product_id}" not found in catalog.` });
       }
 
       if (!product.is_available) {
@@ -102,8 +100,10 @@ export default async function handler(req: any, res: any) {
       customer_name: customer_name.trim(),
       customer_phone: customer_phone.trim(),
       customer_email: customer_email.trim().toLowerCase(),
-      delivery_location: delivery_location?.trim() || 'Kitale Town / Pharmacy Pickup',
-      notes: notes?.trim() || null,
+      delivery_location: typeof delivery_location === 'string' && delivery_location.trim()
+        ? delivery_location.trim()
+        : 'Kitale Town / Pharmacy Pickup',
+      notes: typeof notes === 'string' && notes.trim() ? notes.trim() : null,
       total_kes,
       status: 'pending',
       created_at: now,
@@ -117,7 +117,7 @@ export default async function handler(req: any, res: any) {
       .single();
 
     if (orderError || !order) {
-      console.error('Order insert failed:', orderError);
+      console.error('Order insert failed:', orderError?.message || 'No order returned');
       return res.status(500).json({ error: 'Unable to create the order. Please try again.' });
     }
 
@@ -132,13 +132,12 @@ export default async function handler(req: any, res: any) {
 
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
     if (itemsError) {
-      console.error('Order items insert failed:', itemsError);
+      console.error('Order items insert failed:', itemsError.message);
       await supabase.from('orders').delete().eq('id', order.id);
       return res.status(500).json({ error: 'Unable to save the order items. Please try again.' });
     }
 
     for (const item of validatedItems) {
-      if (!item.product_id) continue;
       const product = (products || []).find((p: any) => p.id === item.product_id);
       if (!product) continue;
       const newStock = Math.max(0, Number(product.stock_quantity) - item.quantity);
@@ -146,7 +145,7 @@ export default async function handler(req: any, res: any) {
         .from('products')
         .update({ stock_quantity: newStock, is_available: newStock > 0 })
         .eq('id', item.product_id);
-      if (stockError) console.error('Stock update failed:', stockError);
+      if (stockError) console.error('Stock update failed:', stockError.message);
     }
 
     return res.status(201).json({
@@ -155,7 +154,7 @@ export default async function handler(req: any, res: any) {
       message: 'Order created successfully.',
     });
   } catch (error: any) {
-    console.error('Vercel orders API error:', error);
-    return res.status(500).json({ error: error?.message || 'Failed to process order.' });
+    console.error('Vercel orders API error:', error?.message || error);
+    return res.status(500).json({ error: 'Failed to process order. Please try again.' });
   }
 }
