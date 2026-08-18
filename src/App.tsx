@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { Navbar } from './components/Navbar';
@@ -12,6 +12,7 @@ import { OrderTrackerModal } from './components/OrderTrackerModal';
 import { AdminPortal } from './components/AdminPortal';
 import { SupabaseDiagnosticsModal } from './components/SupabaseDiagnosticsModal';
 import { Footer } from './components/Footer';
+import { getSupabaseClient } from './lib/supabase';
 import { Product } from './types';
 
 function PharmacyApp() {
@@ -21,6 +22,33 @@ function PharmacyApp() {
   const [isAdminPortalOpen, setIsAdminPortalOpen] = useState(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [activeSection, setActiveSection] = useState('hero');
+  const [adminPortalVersion, setAdminPortalVersion] = useState(0);
+
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel('admin-order-realtime-refresh')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'orders',
+        },
+        () => {
+          // Remount the existing AdminPortal so its existing production
+          // data-fetch logic runs immediately when a new order is created.
+          setAdminPortalVersion(version => version + 1);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, []);
 
   const scrollToSection = (id: string) => {
     setActiveSection(id);
@@ -88,6 +116,7 @@ function PharmacyApp() {
       />
 
       <AdminPortal
+        key={adminPortalVersion}
         isOpen={isAdminPortalOpen}
         onClose={() => setIsAdminPortalOpen(false)}
         onOpenDiagnostics={() => setIsDiagnosticsOpen(true)}
