@@ -1,16 +1,14 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Support both Vite standard (VITE_*) and Next.js standard (NEXT_PUBLIC_*) env variables
-const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
-
 const supabaseUrl = 
-  metaEnv.VITE_SUPABASE_URL ||
-  metaEnv.NEXT_PUBLIC_SUPABASE_URL ||
+  import.meta.env.VITE_SUPABASE_URL ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_URL ||
   '';
 
 const supabaseAnonKey = 
-  metaEnv.VITE_SUPABASE_ANON_KEY ||
-  metaEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   '';
 
 export const isSupabaseConfigured = Boolean(

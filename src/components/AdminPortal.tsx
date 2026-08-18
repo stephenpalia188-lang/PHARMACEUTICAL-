@@ -356,7 +356,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       required
                       value={email}
                       onChange={e => setEmail(e.target.value)}
-                      placeholder="admin@example.com"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm font-medium"
                     />
                   </div>
@@ -370,7 +369,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       required
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      placeholder="Enter password..."
                       className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm"
                     />
                   </div>
@@ -386,16 +384,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   </button>
                 </form>
               )}
-
-              <div className="pt-2 text-center border-t border-slate-100">
-                <button
-                  onClick={onOpenDiagnostics}
-                  className="text-xs text-emerald-700 hover:underline flex items-center gap-1 mx-auto cursor-pointer"
-                >
-                  <Database className="w-3.5 h-3.5" />
-                  <span>Check Supabase Database Connection Status</span>
-                </button>
-              </div>
             </div>
           ) : (
             /* Authenticated Admin Dashboard */
